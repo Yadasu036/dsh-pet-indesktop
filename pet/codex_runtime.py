@@ -22,6 +22,8 @@ class CodexRuntime(QObject):
         self.worker = None
         self.updated.connect(self.present, Qt.QueuedConnection)
         self.last = {}
+        self.active_sessions = set()
+        self.notice_until = {}
 
     def start(self):
         if not self.shell.config.get("agent_link", {}).get("codex", False):
@@ -99,7 +101,7 @@ class CodexRuntime(QObject):
                 self.updated.emit(dict(states))
             except OSError:
                 pass
-            self.stopped.wait(1)
+            self.stopped.wait(.5)
 
     def present(self, states):
         overlay = getattr(self.shell, "_overlay_shell", None)
@@ -109,6 +111,8 @@ class CodexRuntime(QObject):
         # Only active turns occupy pets. Finished historical conversations do not
         # inflate the assignment count; one pet receives all live turns.
         active = {key: value for key, value in states.items() if value != "idle"}
+        added = set(active) - self.active_sessions
+        self.active_sessions = set(active)
         groups = distribute(active, sprites)
         for slot, sessions in groups.items():
             state = next((x for x in ("attention", "error", "working", "thinking") if any(active[s] == x for s in sessions)), "idle")
@@ -117,19 +121,27 @@ class CodexRuntime(QObject):
             host = overlay.host_for_sprite(sprite)
             previous = self.last.get(slot)
             ended = [session for session in previous[1] if states.get(session) == "idle"] if previous else []
+            received = [session for session in sessions if session in added]
+            lifecycle_changed = bool(received or ended)
             changed = previous != snapshot
             if not changed and state not in ("thinking", "working"):
                 continue
             self.last[slot] = snapshot
             label = {"attention": "等待查看", "error": "异常", "working": "工作中", "thinking": "思考中", "idle": "已完成"}[state]
-            if changed:
+            if changed and (lifecycle_changed or time.monotonic() >= self.notice_until.get(slot, 0) or state in ("attention", "error")):
                 logging.info("Codex session routing: slot=%s state=%s sessions=%s", slot, state, len(sessions))
                 message = f"Codex · {label} · {len(sessions)}个会话"
+                if received:
+                    message = f"Codex · 新增{len(received)}个会话 · 当前{len(sessions)}个会话"
                 if ended:
                     message = f"Codex · {len(ended)}个会话已结束 · 剩余{len(sessions)}个会话"
+                    if received:
+                        message = f"Codex · 新增{len(received)}个会话 · {len(ended)}个会话已结束 · 剩余{len(sessions)}个会话"
                     if not sessions:
                         message += " · 已完成"
                 overlay._show_bubble_text_for(sprite, message, 4500)
+                if lifecycle_changed:
+                    self.notice_until[slot] = time.monotonic() + 4.5
             if state in ("thinking", "working"):
                 categories = host.behavior._categories(sprite.library)
                 acts = categories.get("acts", [])
@@ -137,3 +149,4 @@ class CodexRuntime(QObject):
                 if acts and host.behavior.state_of(sprite) == "idle":
                     host.behavior.play_once(sprite, str((preferred or acts)[0]))
         self.last = {key: value for key, value in self.last.items() if key in sprites}
+        self.notice_until = {key: value for key, value in self.notice_until.items() if key in sprites}

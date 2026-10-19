@@ -143,3 +143,68 @@ def test_finished_session_notifies_its_previous_pet_once(qapp, slots):
     runtime.updated.emit({"a": "idle", "b": "idle", "c": "idle"})
     qapp.processEvents()
     assert "剩余0个会话" in bubbles[-1][1]
+
+
+@pytest.mark.parametrize("slots", [[1], [1, 4]])
+def test_new_session_notice_survives_work_phase_changes(qapp, monkeypatch, slots):
+    now = [100.0]
+    monkeypatch.setattr("pet.codex_runtime.time.monotonic", lambda: now[0])
+    sprites = {slot: Sprite() for slot in slots}
+    bubbles = []
+    behavior = Behavior()
+    overlay = SimpleNamespace(
+        _spawned_slots={sprite: slot for slot, sprite in sprites.items()},
+        _all_sprites=lambda: list(sprites.values()),
+        _sprite_visible=lambda s: True,
+        host_for_sprite=lambda s: SimpleNamespace(behavior=behavior),
+        _show_bubble_text_for=lambda *args: bubbles.append(args),
+    )
+    runtime = CodexRuntime(SimpleNamespace(_overlay_shell=overlay))
+    runtime.updated.emit({"a": "thinking", "b": "thinking"})
+    qapp.processEvents()
+    bubbles.clear()
+    runtime.updated.emit({"a": "thinking", "b": "thinking", "c": "thinking"})
+    qapp.processEvents()
+    notices = [entry for entry in bubbles if "新增1个会话" in entry[1]]
+    assert len(notices) == 1
+    assert notices[0][0] is sprites[1]
+    before = len(bubbles)
+    now[0] += .5
+    runtime.updated.emit({"a": "working", "b": "working", "c": "working"})
+    qapp.processEvents()
+    assert len(bubbles) == before
+    # Action-required state may interrupt a passive lifecycle notice.
+    runtime.updated.emit({"a": "attention", "b": "working", "c": "working"})
+    qapp.processEvents()
+    assert "等待查看" in bubbles[-1][1]
+    now[0] += 5
+    runtime.updated.emit({"a": "working", "b": "working", "c": "working"})
+    qapp.processEvents()
+    assert "工作中" in bubbles[-1][1]
+
+
+def test_new_session_is_picked_up_on_next_half_second_poll(tmp_path, monkeypatch, qapp):
+    import json
+    from datetime import datetime
+    from PySide6.QtCore import Qt
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    day = tmp_path / "sessions" / datetime.now().strftime("%Y/%m/%d")
+    day.mkdir(parents=True)
+    record = json.dumps({"type": "event_msg", "payload": {"type": "task_started"}}) + "\n"
+    (day / "first.jsonl").write_text(record)
+    runtime = CodexRuntime(SimpleNamespace())
+    snapshots, waits = [], []
+    runtime.updated.connect(snapshots.append, Qt.DirectConnection)
+
+    def next_cycle(interval):
+        waits.append(interval)
+        if len(snapshots) == 1:
+            (day / "new.jsonl").write_text(record)
+        else:
+            runtime.stopped.set()
+
+    monkeypatch.setattr(runtime.stopped, "wait", next_cycle)
+    runtime.poll()
+    assert [len(snapshot) for snapshot in snapshots] == [1, 2]
+    assert waits == [.5, .5]
