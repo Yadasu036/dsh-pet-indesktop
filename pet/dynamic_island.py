@@ -372,10 +372,13 @@ def _cfg_dict(config) -> dict:
 def _native_reassert_topmost(window) -> bool:
     """Windows：把窗口原生重插到 topmost 带最上（不激活/不移动/不改大小）。
 
-    非 Windows 一律返回 ``False``，调用方回退 Qt ``raise_()``——macOS 的
-    NSWindow level 与 Windows 的 topmost 带不是一回事，"重申后是否真的最上"
-    在 macOS 上**未验证**（Linux 同理）。
+    macOS 仅调整原生窗口顺序。Qt Cocoa 的 raise() 会激活整个应用，
+    即使窗口带 WindowDoesNotAcceptFocus，也会打断其它应用输入。
     """
+    if sys.platform == "darwin":
+        from .platform_mac import _mac_order_front_without_activating
+
+        return _mac_order_front_without_activating(int(window.winId()))
     if sys.platform != "win32":
         return False
     try:
@@ -880,7 +883,10 @@ class DynamicIsland(QWidget):
             return False
         if _native_reassert_topmost(self):
             return True
-        # 非 Windows（macOS / Linux **未验证**）：Qt 层 raise_() 兜底
+        if sys.platform == "darwin":
+            # Native failure must not fall back to an application-activating call.
+            return False
+        # Linux fallback; Windows also reaches here if the native call fails.
         self.raise_()
         return True
 

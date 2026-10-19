@@ -1,0 +1,1 @@
+{"id": "codex_5h", "label": "C5h", "max_text": "100", "unit": "%", "unit_full": "剩余额度百分比", "source": "Codex订阅", "detail": "每3分钟查询；失败显示不可用", "thresholds": null, "provider": "provider.py", "read": "read_value", "format": "format_value"}

@@ -13,8 +13,8 @@ overlay_window / platform_win 里既无 ``raise_()`` 也无 ``SetWindowPos``）�
 
 - 原生原语 ``platform_win._set_windows_topmost``（SetWindowPos + argtypes，
   64 位 HWND 安全）；
-- 岛的公开入口 ``DynamicIsland.reassert_topmost``：Windows 走原生，其它平台
-  回退 Qt ``raise_()``（macOS/Linux 语义未验证）；
+- 岛的公开入口 ``DynamicIsland.reassert_topmost``：Windows/macOS 走不激活的原生重排，其它平台
+  回退 Qt ``raise_()``（Linux 语义未验证）；
 - 触发点全部是事件驱动或复用既有通道（show / 岛自身刷新心跳 / 本进程窗口被
   激活 / 点击岛），**不新增定时器与线程**；
 - 外部应用抢前台（开始菜单、全屏游戏、第三方置顶工具）**不**重申——否则岛会
@@ -243,3 +243,27 @@ def test_set_windows_topmost_off_demotes_to_notopmost():
 def test_set_windows_topmost_reports_api_failure():
     user32 = _FakeUser32(result=0)
     assert platform_win._set_windows_topmost(123, True, user32) is False
+
+
+@pytest.mark.parametrize("native_ok", [True, False])
+def test_macos_heartbeat_never_uses_qt_raise(tmp_path, monkeypatch, native_ok):
+    """Cocoa raise activates NSApp even for a window refusing keyboard focus."""
+    from pet import dynamic_island as module
+    from pet import platform_mac
+
+    app = _qapp()
+    island = _island(tmp_path)
+    island.show()
+    _settle(app)
+    native_calls, raises = [], []
+    monkeypatch.setattr(module.sys, "platform", "darwin")
+    monkeypatch.setattr(platform_mac, "_mac_order_front_without_activating",
+                        lambda wid: (native_calls.append(wid), native_ok)[1], raising=False)
+    monkeypatch.setattr(DynamicIsland, "raise_", lambda self: raises.append(self))
+    try:
+        island._info_timer.timeout.emit()
+        assert native_calls
+        assert raises == []
+    finally:
+        island.hide()
+        island.deleteLater()

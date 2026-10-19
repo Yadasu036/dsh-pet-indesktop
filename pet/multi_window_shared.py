@@ -527,6 +527,8 @@ class SharedSubsystems:
     """
 
     def __init__(self, shell) -> None:
+        from .codex_runtime import CodexRuntime
+        self.codex = CodexRuntime(shell)
         self.proxy = MultiWindowProxy(shell)
         self.agent_link = SharedAgentLinkManager(self.proxy, shell.config)
         # 共享 watcher 的 cfg 是**进程级**配置（开关/白名单/额度/密钥都是全局面），
@@ -571,6 +573,7 @@ class SharedSubsystems:
             state.ack_report()
 
     def start(self) -> None:
+        self.codex.start()
         # overlay 拓扑不启共享全屏 watcher：sprite 世界的壳自持
         # ``FullscreenCursorWatcher``（4.1b），且刻意不暴露 ``_watch_required``
         # / ``_cursor_hidden_passthrough_enabled`` / ``auto_hide_fullscreen``
@@ -590,6 +593,7 @@ class SharedSubsystems:
         不掉，解释器退出 GC 才最终化 → 原生访问违规（见 _LIVE_SHARED_SUBSYSTEMS
         注释）。
         """
+        self.codex.stop()
         self.proactive.stop_all()
         self.agent_link.stop_all()
         self.fs.stop()

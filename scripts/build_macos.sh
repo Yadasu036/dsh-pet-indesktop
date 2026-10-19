@@ -176,6 +176,7 @@ for variant in "${variant_list[@]}"; do
         done
     fi
 
+    args+=(--add-data "resources/codex-island-extensions:island-extensions")
     echo "==> 构建 $name.app"
     "$PYTHON_BIN" -m PyInstaller "${args[@]}" "$entry"
     # 本地 OCR 随包校验（与 Windows 的 build_onedir.ps1 同口径）：上面那条门只证明

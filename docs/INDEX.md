@@ -142,6 +142,8 @@
 
 ## PR 报告存档
 
+- [Codex 原生接入本地验证报告](PR-REPORT-CODEX-NATIVE-2026-10-19.md)：账号聊天、额度、按宠分配和macOS后台运行；验收与限制见报告。
+
 - [歌词让位于 Agent 状态提示（2026-10-17）](PR-REPORT-LYRIC-AGENT-PRIORITY-2026-10-17.md)：修复歌词持续占用通知槽、吞掉开始/结束提示；涉及歌词和 Agent 气泡优先级时必读。
 - [Hermes Agent Link 桥接（2026-10-17）](PR-REPORT-HERMES-PET-BRIDGE-2026-10-17.md)：把 Hermes 生命周期/审批 hook 接入桌宠既有 Agent Link，并记录 Chat 走 Hermes API Server 的接入方式；维护 Hermes 联动或排查状态气泡时必读。
 

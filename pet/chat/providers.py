@@ -66,6 +66,10 @@ def test_connection(config, timeout: float = 10.0):
     """发送一个最小的非流式请求验证端点连通性（含 TLS 校验）。
     返回 (ok: bool, message: str)，供设置界面"测试连接"使用，不写入任何状态。"""
     try:
+        if config.base_url == 'codex://local':
+            from ..codex_rpc import CLIENT
+            CLIENT.call('account/rateLimits/read')
+            return True, 'Codex 订阅账号连接成功'
         endpoint = normalize_chat_endpoint(config.base_url, config.chat_path)
         payload = {'model': config.model, 'messages': [{'role': 'user', 'content': 'ping'}], 'max_tokens': 1, 'stream': False}
         headers = build_browser_headers({'Content-Type': 'application/json'})
@@ -223,6 +227,15 @@ class OpenAICompatibleProvider:
         except OSError as exc: raise ProviderError(f'网络请求失败：{exc}') from exc
 
     def stream(self,messages:list[dict[str,Any]],config:ProviderConfig,cancel_event:threading.Event,response_holder:list|None=None)->Iterator[str]:
+        if config.base_url == 'codex://local':
+            from ..codex_rpc import CLIENT
+            prompt = ('Act as a text-only desktop companion. Do not use tools. '
+                      'Answer the final user message in this conversation:\n'
+                      + json.dumps(messages, ensure_ascii=False))
+            answer = CLIENT.chat(prompt)
+            if not cancel_event.is_set():
+                yield answer
+            return
         web=getattr(config,'web_search',None)
         if web is not None and getattr(web,'enabled',False) and not cancel_event.is_set():
             notes=yield from self._research(messages,config,cancel_event,response_holder)

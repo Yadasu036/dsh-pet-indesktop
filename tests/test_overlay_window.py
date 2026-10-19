@@ -790,3 +790,21 @@ def test_mac_set_hides_on_deactivate_is_safe_off_cocoa():
     from pet.platform_mac import _mac_set_hides_on_deactivate
 
     assert _mac_set_hides_on_deactivate(0) is False
+
+
+def test_macos_overlay_never_accepts_keyboard_focus_after_restore(monkeypatch):
+    """Background overlays remain nonactivating through native-window recreation."""
+    import pet.overlay_window as module
+
+    monkeypatch.setattr(module.sys, "platform", "darwin")
+    window = OverlayWindow()
+    try:
+        assert window.windowFlags() & Qt.WindowType.WindowDoesNotAcceptFocus
+        assert window.testAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        window.show()
+        window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, False)
+        window.show()
+        assert window.windowFlags() & Qt.WindowType.WindowDoesNotAcceptFocus
+        assert window.testAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+    finally:
+        window.close()

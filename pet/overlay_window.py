@@ -75,10 +75,18 @@ class OverlayWindow(QWidget):
         super().__init__(parent)
         # macOS 关窗口系统阴影（issue #229：外圈黑边，普通模式与直播捕获模式都要关）：
         # 标志只能在 flags 构造处给（见 platform_mac._mac_no_window_shadow_flag）。
+        focus_flags = (Qt.WindowType.WindowDoesNotAcceptFocus
+                       if sys.platform == "darwin" else Qt.WindowType(0))
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint
                             | Qt.WindowType.Tool
                             | Qt.WindowType.WindowStaysOnTopHint
+                            | focus_flags
                             | _mac_no_window_shadow_flag())
+        if sys.platform == "darwin":
+            # A background NSPanel must never become the key window, including
+            # after show/restore and topmost-flag recreation. Mouse interaction
+            # stays enabled; explicit chat lives in a separate focusable window.
+            self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
         # macOS：本窗带 Qt.Tool，Cocoa 在应用失活时会自动把它 order out。真机表现是

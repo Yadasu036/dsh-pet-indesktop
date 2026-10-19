@@ -27,6 +27,8 @@ import math
 import os
 import time
 
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QCoreApplication, QTimer, Qt
@@ -667,29 +669,47 @@ def test_old_structure_fades_out_while_shared_stays_intact(tmp_path, monkeypatch
         island.deleteLater()
 
 
-def test_sample_value_change_never_fades(tmp_path):
-    """采样值换字零动画（硬规则）：余额换字不播淡化，帧就是新位图。"""
+@pytest.mark.parametrize("old_value,new_value", [
+    ("余额 ¥88888.88", "余额 ¥1.00"),
+    ("余额 ¥1.00", "余额 ¥88888.88"),
+])
+def test_sample_value_change_never_fades(tmp_path, old_value, new_value):
+    """采样值换字零动画：与直接显示目标读数的完整帧一致，含抗锯齿边缘。
+
+    不依赖字体产生多少 alpha=255 像素（macOS 实测34个，另有493个半透明像素）。
+    用同环境、同配置的新岛作参照，同时检查长短读数互换后的旧字残留和内容稀释。
+    """
     _qapp()
     island = _island(tmp_path, info_mode="balance")
     island.show()
     try:
         _qapp().processEvents()
         _render(island)
-        island.set_balance_info("峰谷", "余额 ¥88888.88")
+        island.set_balance_info("峰谷", old_value)
         first = _content(island)
-        _render(island)
+        before = _render(island)
         assert island._content_fade_timer is None
 
-        island.set_balance_info("峰谷", "余额 ¥1.00")  # 换字（盒宽不变）
+        island.set_balance_info("峰谷", new_value)  # 换字（盒宽不变）
         second = _content(island)
-        assert second is not first, "前提：读数真的换了（位图重建）"
+        assert second != first, "前提：读数真的换了（内容像素不同）"
         frame = _render(island)
         assert island._content_fade_timer is None, "采样值换字不得起淡化"
         assert island._content_fade_t == 1.0
         assert island._content_fade_from is None
 
-        checked = _assert_frame_is_content(frame, second, island)
-        assert checked >= 60, f"取样点太少（{checked}）"
+        assert before.size() == frame.size(), "采样值换字不得改变窗口宽度"
+        assert before != frame, "前提：换字确实改变了显示画面"
+        fresh = _island(tmp_path, info_mode="balance")
+        try:
+            fresh.set_balance_info("峰谷", new_value)
+            fresh.show()
+            _qapp().processEvents()
+            reference = _render(fresh)
+            assert frame == reference, "换字帧与直接显示目标读数不一致（淡化或旧字残留）"
+        finally:
+            fresh.hide()
+            fresh.deleteLater()
     finally:
         island.hide()
         island.deleteLater()

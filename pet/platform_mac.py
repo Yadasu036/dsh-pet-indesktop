@@ -13,6 +13,34 @@ import sys
 from PySide6.QtCore import Qt
 
 
+def _mac_order_front_without_activating(view_id: int) -> bool:
+    """Reorder a visible Cocoa window without activating NSApp or taking focus."""
+    if sys.platform != "darwin":
+        return False
+    from PySide6.QtGui import QGuiApplication
+
+    if QGuiApplication.platformName() != "cocoa":
+        return False
+    try:
+        import ctypes
+        import ctypes.util
+
+        objc = ctypes.CDLL(ctypes.util.find_library("objc") or "/usr/lib/libobjc.A.dylib")
+        objc.sel_registerName.restype = ctypes.c_void_p
+        objc.sel_registerName.argtypes = [ctypes.c_char_p]
+        send = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)(
+            ("objc_msgSend", objc))
+        window = send(view_id, objc.sel_registerName(b"window"))
+        if not window:
+            return False
+        order = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p)(
+            ("objc_msgSend", objc))
+        order(window, objc.sel_registerName(b"orderFrontRegardless"))
+        return True
+    except (OSError, AttributeError, TypeError):
+        return False
+
+
 def _keep_macos_tool_window_visible(window) -> None:
     """Tool windows must remain visible while another application is active.
 
