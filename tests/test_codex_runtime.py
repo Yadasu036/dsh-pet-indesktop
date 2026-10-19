@@ -208,3 +208,81 @@ def test_new_session_is_picked_up_on_next_half_second_poll(tmp_path, monkeypatch
     runtime.poll()
     assert [len(snapshot) for snapshot in snapshots] == [1, 2]
     assert waits == [.5, .5]
+
+
+def test_recently_resumed_old_session_is_discovered(tmp_path, monkeypatch, qapp):
+    import json
+    from datetime import datetime, timedelta
+    from PySide6.QtCore import Qt
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    old_day = tmp_path / "sessions" / (datetime.now() - timedelta(days=30)).strftime("%Y/%m/%d")
+    old_day.mkdir(parents=True)
+    runtime = CodexRuntime(SimpleNamespace())
+    snapshots = []
+    runtime.updated.connect(snapshots.append, Qt.DirectConnection)
+
+    def next_cycle(_):
+        if len(snapshots) == 1:
+            (old_day / "resumed.jsonl").write_text(json.dumps({"type": "event_msg", "payload": {"type": "task_started"}}) + "\n")
+        else:
+            runtime.stopped.set()
+
+    monkeypatch.setattr(runtime.stopped, "wait", next_cycle)
+    runtime.poll()
+    assert snapshots == [{}, {str(old_day / "resumed.jsonl"): "thinking"}]
+
+
+def test_known_active_session_survives_age_cutoff_and_disappears_on_archive(tmp_path, monkeypatch, qapp):
+    import json
+    import os
+    import time
+    from datetime import datetime
+    from PySide6.QtCore import Qt
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    day = tmp_path / "sessions" / datetime.now().strftime("%Y/%m/%d")
+    day.mkdir(parents=True)
+    path = day / "active.jsonl"
+    path.write_text(json.dumps({"type": "event_msg", "payload": {"type": "task_started"}}) + "\n")
+    runtime = CodexRuntime(SimpleNamespace())
+    snapshots = []
+    runtime.updated.connect(snapshots.append, Qt.DirectConnection)
+
+    def next_cycle(_):
+        if len(snapshots) == 1:
+            stale = time.time() - 10 * 86400
+            os.utime(path, (stale, stale))
+        elif len(snapshots) == 2:
+            path.unlink()
+        else:
+            runtime.stopped.set()
+
+    monkeypatch.setattr(runtime.stopped, "wait", next_cycle)
+    runtime.poll()
+    assert snapshots == [{str(path): "thinking"}, {str(path): "thinking"}, {}]
+
+
+def test_discovery_does_not_count_stale_history_or_subagents(tmp_path, monkeypatch, qapp):
+    import json
+    import os
+    import time
+    from PySide6.QtCore import Qt
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    day = tmp_path / "sessions" / "2020/01/01"
+    day.mkdir(parents=True)
+    started = {"type": "event_msg", "payload": {"type": "task_started"}}
+    stale = day / "stale.jsonl"
+    stale.write_text(json.dumps(started) + "\n")
+    old = time.time() - 10 * 86400
+    os.utime(stale, (old, old))
+    subagent = {"type": "session_meta", "payload": {"source": {"subagent": {"parent_thread_id": "parent"}}}}
+    (day / "subagent.jsonl").write_text(json.dumps(subagent) + "\n" + json.dumps(started) + "\n")
+    runtime = CodexRuntime(SimpleNamespace())
+    snapshots = []
+    runtime.updated.connect(snapshots.append, Qt.DirectConnection)
+    monkeypatch.setattr(runtime.stopped, "wait", lambda _: runtime.stopped.set())
+    runtime.poll()
+    assert not any(value != "idle" for value in snapshots[-1].values())
+    assert str(stale) not in snapshots[-1]

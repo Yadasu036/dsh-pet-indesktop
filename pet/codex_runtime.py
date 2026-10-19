@@ -6,7 +6,6 @@ import logging
 import os
 import threading
 import time
-from datetime import datetime, timedelta
 from pathlib import Path
 from PySide6.QtCore import QObject, Signal, Qt
 from .codex_sessions import distribute, reduce_event
@@ -65,39 +64,47 @@ class CodexRuntime(QObject):
         offsets, states, excluded = {}, {}, set()
         while not self.stopped.is_set():
             try:
-                for day in (datetime.now() - timedelta(days=n) for n in range(3)):
-                    for path in (root / day.strftime("%Y/%m/%d")).glob("*.jsonl"):
-                        if path in excluded:
-                            continue
-                        stat = path.stat()
-                        old = offsets.get(path)
-                        offset = old[1] if old and old[0] == stat.st_ino and old[1] <= stat.st_size else 0
-                        state = states.get(str(path), "idle")
-                        with path.open("rb") as stream:
-                            stream.seek(offset)
-                            while True:
-                                pos = stream.tell()
-                                # Images/tool output can make a JSONL record exceed 1 MiB.
-                                # Read through its newline so later completion events remain reachable.
-                                line = stream.readline()
-                                if not line:
-                                    break
-                                if not line.endswith(b"\n"):
-                                    stream.seek(pos)
-                                    break
-                                try:
-                                    record = json.loads(line)
-                                    if record.get("type") == "session_meta":
-                                        source = record.get("payload", {}).get("source")
-                                        if isinstance(source, dict) and "subagent" in source:
-                                            excluded.add(path)
-                                            state = "idle"
-                                            break
-                                    state = reduce_event(record, state)
-                                except (ValueError, AttributeError, TypeError):
-                                    pass
-                            offsets[path] = (stat.st_ino, stream.tell())
-                        states[str(path)] = state
+                cutoff = time.time() - 3 * 86400
+                seen = set()
+                # Resumed sessions keep their original date directory. Discover
+                # by recent writes, and retain already-active tails regardless of age.
+                for path in root.glob("*/*/*/*.jsonl"):
+                    if path in excluded:
+                        continue
+                    stat = path.stat()
+                    if stat.st_mtime < cutoff and states.get(str(path), "idle") == "idle":
+                        continue
+                    seen.add(path)
+                    old = offsets.get(path)
+                    offset = old[1] if old and old[0] == stat.st_ino and old[1] <= stat.st_size else 0
+                    state = states.get(str(path), "idle")
+                    with path.open("rb") as stream:
+                        stream.seek(offset)
+                        while True:
+                            pos = stream.tell()
+                            # Images/tool output can make a JSONL record exceed 1 MiB.
+                            # Read through its newline so later completion events remain reachable.
+                            line = stream.readline()
+                            if not line:
+                                break
+                            if not line.endswith(b"\n"):
+                                stream.seek(pos)
+                                break
+                            try:
+                                record = json.loads(line)
+                                if record.get("type") == "session_meta":
+                                    source = record.get("payload", {}).get("source")
+                                    if isinstance(source, dict) and "subagent" in source:
+                                        excluded.add(path)
+                                        state = "idle"
+                                        break
+                                state = reduce_event(record, state)
+                            except (ValueError, AttributeError, TypeError):
+                                pass
+                        offsets[path] = (stat.st_ino, stream.tell())
+                    states[str(path)] = state
+                offsets = {path: value for path, value in offsets.items() if path in seen}
+                states = {key: value for key, value in states.items() if Path(key) in seen}
                 self.updated.emit(dict(states))
             except OSError:
                 pass
