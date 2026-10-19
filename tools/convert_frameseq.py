@@ -13,11 +13,9 @@
                                      [--include random,events]
 幂等：当前源已有**同档位**的可用世代目录（名字戳与 meta 戳自洽、帧数与磁盘相符、
 encoder 串与本目录档位一致）即跳过；--force 全量重转。
-档位由 webm 相对 videos 的第一级目录决定：热集（idle/move/turn/click/drag）走
-无损 ``-lossless 1``，``--include`` 进来的 random/events 走有损
-``-lossless 0 -quality 80``（meta 写 ``ENCODER_DESC_LOSSY``）。默认范围仍是热集
-（random/events 体积大，构建期是否转换由打包方决定；运行时自动供给的范围是
-热集 + random + events，见 ``frameseq_provision.SUPPLY_FOLDERS``）。
+所有目录统一使用 Q90 + 白底反解 v5，alpha无损保存。默认范围仍是热集
+（idle/move/turn/click/drag）；--include random,events 增补其它动画。
+运行时自动供给范围为热集 + random + events，见 frameseq_provision.SUPPLY_FOLDERS。
 本工具是**构建期入口，不设启动预算**（一轮转完范围内全部 webm）；运行时的首跑
 自动供给按每次启动的预算分批、失败退避，见 ``frameseq_provision.provision_once``。
 退出码：0 全部成功；1 角色目录缺失/无匹配 webm/有失败 clip（明细打到 stderr）。
@@ -50,7 +48,7 @@ def main() -> int:
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--include", default="",
                         help="逗号分隔的额外目录（默认只转热集 idle/move/turn/click/drag；"
-                             "random/events 按有损档 Q80 转）")
+                             "random/events 同样按统一 Q90 档转）")
     args = parser.parse_args()
 
     videos = REPO_ROOT / "assets" / "characters" / args.character / "videos"
@@ -73,7 +71,7 @@ def main() -> int:
         out_dir = clip_out_dir(webm, videos, out_root)
         converted, err = convert_clip(
             webm, out_dir, force=args.force,
-            lossy=is_lossy_clip(webm, videos),   # 档位由目录决定（同运行时供给）
+            lossy=is_lossy_clip(webm, videos),   # 兼容参数，实际统一使用当前档位
         )
         if err:
             failed += 1

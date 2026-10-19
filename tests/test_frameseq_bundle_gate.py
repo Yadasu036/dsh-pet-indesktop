@@ -235,6 +235,18 @@ class TestGateVerdicts:
         # 同源守卫：这一档必须在 provision 的 LEGACY 清单里（改档不许漏登记）
         assert SUPERSEDED_ENCODER in PROVISION_SOURCE.read_text(encoding="utf-8")
 
+    def test_previous_q70_quality_fails(self, tmp_path):
+        """Q70-v5 alpha处理相同，但不能冒充当前高质量档。"""
+        characters = tmp_path / "characters"
+        encoder = "libwebp lossy q70 (bgra straight, unblend-white-v5)"
+        _make_clip(characters, "shenshen", "写代码", encoder=encoder,
+                   unblend=GATE.UNBLEND_MARK)
+        result = _run(characters)
+        assert result.returncode == 1, result.stdout
+        assert encoder in result.stderr
+        assert GATE.ENCODER_DESC in result.stderr
+        assert encoder in PROVISION_SOURCE.read_text(encoding="utf-8")
+
     def test_corrupt_meta_fails(self, tmp_path):
         characters = tmp_path / "characters"
         _make_clip(characters, "shenshen", "写代码", meta="corrupt")

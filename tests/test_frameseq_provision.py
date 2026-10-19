@@ -1560,28 +1560,30 @@ def test_library_falls_back_when_source_changed(tmp_path, monkeypatch):
         lib.shutdown()
 
 
-def test_library_rejects_v3_generation_and_adopts_v5(tmp_path, monkeypatch):
-    """改档回归：磁盘上的 **v3** 世代不再被采纳，按当前档重出的同一路径才被采纳。
+@pytest.mark.parametrize("old_encoder,old_unblend", [
+    ("libwebp lossy q70 (bgra straight, unblend-white-v3)", "white-v3"),
+    ("libwebp lossy q70 (bgra straight, unblend-white-v5)", "white-v5"),
+])
+def test_library_rejects_old_quality_and_adopts_current(tmp_path, monkeypatch,
+                                                       old_encoder, old_unblend):
+    """旧反解档或Q70-v5不能冒充Q90；同源同路径按当前档重出后才被采纳。
 
-    ``white-v5`` 相对 v3 只多一步 alpha 底板清理（把 ``a == 1`` 的整块背景清成 0），
-    对库来说这就是一次改档：世代目录名随**源身份**（不变），档位在 meta 里 —— 所以
-    "同一路径上换成新档产物"正是升级时的真实形态（供给按当前档重转同一目录）。
+    源摘要和目录身份不变，quality差异由encoder串区分；alpha反解仍为white-v5。
     """
     videos, frameseq = _make_pack(tmp_path, {"idle": ["x.webm"]})
     webm = videos / "idle" / "x.webm"
-    v3_encoder = "libwebp lossy q70 (bgra straight, unblend-white-v3)"
-    assert v3_encoder in fp.LEGACY_ENCODER_DESCS
+    assert old_encoder in fp.LEGACY_ENCODER_DESCS
     gen = fp.clip_out_dir(webm, videos, frameseq)
     _write_frames(gen, FRAME_COUNT)
     (gen / "meta.json").write_text(json.dumps({
         "fps": 24.0, "source": webm.name, "frames": FRAME_COUNT,
-        "encoder": v3_encoder, "unblend": "white-v3",
+        "encoder": old_encoder, "unblend": old_unblend,
         "source_sha256": fp.source_sha256(webm)}), encoding="utf-8")
     _light_clips(monkeypatch)
 
     lib = MovieLibrary(asset_dir=videos, prewarm_enabled=False)
     try:
-        assert lib._frameseq_dirs == {}                   # v3 世代不采纳
+        assert lib._frameseq_dirs == {}                   # 旧质量/旧反解世代不采纳
         assert isinstance(lib.movie("x"), _FakeClip)      # 回退 WebM（不冻结、不播旧档）
         assert fp.current_generation(webm, videos, frameseq) is None
         assert [pair[0] for pair in fp.plan_clips(videos, frameseq)] == [webm]
@@ -2281,14 +2283,15 @@ def test_encoder_strings_are_frozen():
     从未启用，档号直接落到 v5。
     """
     assert fp.LOSSY_FOLDERS == ("random", "events")
-    assert fp.ENCODER_DESC == "libwebp lossy q70 (bgra straight, unblend-white-v5)"
+    assert fp.ENCODER_DESC == "libwebp lossy q90 (bgra straight, unblend-white-v5)"
     assert fp.UNBLEND_MARK == "white-v5"
-    assert fp.WEBP_QUALITY == 70
+    assert fp.WEBP_QUALITY == 90
     assert fp.LEGACY_ENCODER_DESCS == (
         "libwebp lossless (bgra straight)",
         "libwebp lossy q80 (bgra straight)",
         "libwebp lossy q70 (bgra straight, unblend-white)",
         "libwebp lossy q70 (bgra straight, unblend-white-v3)",
+        "libwebp lossy q70 (bgra straight, unblend-white-v5)",
     )
     assert fp.ENCODER_DESC not in fp.LEGACY_ENCODER_DESCS
     # 反解 v3 的三个可调常量（依据见模块注释）+ v5 清掉的 alpha 值

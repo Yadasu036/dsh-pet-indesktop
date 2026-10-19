@@ -2,9 +2,9 @@
 """帧序列「首跑自动供给」（帧序列化 B 档）。
 
 素材包不带 frameseq 时（安装包只带 webm），运行时后台低优先级把 webm 转成
-WebP 帧序列。**全部 clip 统一一档**：Q70 有损 + 白底反解 v5（``ENCODER_DESC``）
+WebP 帧序列。**全部 clip 统一一档**：Q90 有损 + 白底反解 v5（``ENCODER_DESC``）
 ——热集（idle/move/turn/click/drag ≈95% 播放时长）与冷集（random/events）不再分档，
-旧的四代产物（热集无损 / 冷集 Q80 / 反解 v2 / 反解 v3）因此都不再被采纳
+旧产物（热集无损 / 冷集 Q80 / 反解 v2 / 反解 v3 / Q70-v5）因此都不再被采纳
 （``current_generation``）。
 
 转换分**两段**（``convert_clip``）：
@@ -14,7 +14,7 @@ WebP 帧序列。**全部 clip 统一一档**：Q70 有损 + 白底反解 v5（`
 2. **逐帧白底反解 v5 + 有损重编码**：``unblend_frames_in_place`` 用 Pillow 逐帧跑
    ``unblend_v3``（反解 ``unblend_rgba`` → 低 alpha 亮色收色 → 镂空还原
    ``restore_hair_holes`` → alpha 微缩 1px）最后接 **alpha 底板清理**
-   （``floor_faint_alpha``：``a == 1`` 的像素清成全透明）后原地编码 Q70。镂空还原
+   （``floor_faint_alpha``：``a == 1`` 的像素清成全透明）后原地编码 Q90。镂空还原
    本来是 v3 档位内的缺陷收口（当时不构成新档），针对
    v3 结构性够不到的那一类——**抠图整块失败的背景残留**（发丝间该透明的缝隙留成了
    ``a = 255`` 的实心灰白块）；但它在实机上**误切了白色鲸鳍**（残留与白色艺术品在该
@@ -43,7 +43,7 @@ unlink 而不是一整趟编码。成本对比见 PR 报告的性能分析。
   前 12 位）——**目录名即身份**，meta.json 同时写全量 ``source_sha256``。
   采纳（帧序列化 B 档生效）要求五件事同时成立：目录名看得出戳、meta 有合法
   戳、名字戳 = meta 戳前缀、meta 帧数 = 磁盘帧数、**meta encoder = 当前档位串
-  ``ENCODER_DESC``**（Q70 + 白底反解 v5：档位不符说明这份产物不是按当前档产出的
+  ``ENCODER_DESC``**（Q90 + 白底反解 v5：档位不符说明这份产物不是按当前档产出的
   ——改档前的热集无损 / 冷集 Q80 / 反解 v2 / 反解 v3 世代全在这一条上被拦住
   ——宁可重转，不拿旧档产物顶替）；
   给强身份时还要求 meta 戳 =
@@ -107,7 +107,7 @@ unlink 而不是一整趟编码。成本对比见 PR 报告的性能分析。
   （白底项 ≤2%，整数除法反而引入 ±1 抖动）。单帧处理不了就**跳过该帧并记日志**
   （原文件那份无损帧原样留着：能播、帧数对），绝不中断整段供给；只有整段进不了
   阶段二（Pillow / ``ImageMath.lambda_eval`` 不可用）才按失败收口——宁可不产出，
-  也不写一份「Q70 + 反解 v5」却不成立的假 meta。帧数契约因此只有一处定义：
+  也不写一份「Q90 + 反解 v5」却不成立的假 meta。帧数契约因此只有一处定义：
   ``meta.frames`` = 磁盘 ``f_*.webp`` 数（阶段二原地覆盖，一张都不增删）；
 - fps 探测用 ``imageio_ffmpeg.read_frames`` 的 meta（运行时不带 ffprobe）；
 - 幂等：当前源已有可用世代目录 → 跳过（不重编码、不重建半成品）；
@@ -221,7 +221,7 @@ logger = logging.getLogger(__name__)
 # 热集目录（≈95% 播放时长）：供给序排在最前
 HOT_FOLDERS: tuple[str, ...] = ("idle", "move", "turn", "click", "drag")
 # 冷集目录（random/events）：数量多、单段短、磁盘占比大（45MB+3MB 对热集 5.45MB），
-# 屏幕时间占比极低。改档后**不再是"有损档"**（全部 clip 统一 Q70）：这组名字只
+# 屏幕时间占比极低。改档后**不再是"有损档"**（全部 clip 统一 Q90）：这组名字只
 # 决定供给序（排在全部热集之后）与迁移配额的先后。
 LOSSY_FOLDERS: tuple[str, ...] = ("random", "events")
 # 供给范围 = 热集 + 冷集
@@ -264,17 +264,17 @@ BACKOFF_NAME = ".backoff.json"
 BACKOFF_BASE_S = 300.0
 BACKOFF_MAX_S = 6 * 3600.0
 DEFAULT_FPS = 24.0
-# 统一编码档：**全部 clip** 一档（Q70 + 白底反解 v5 = v3 三步 + alpha 底板清理）。
+# 统一编码档：**全部 clip** 一档（Q90 + 白底反解 v5 = v3 三步 + alpha 底板清理）。
 # encoder 串是采纳条件的一部分（``current_generation``），改它 = 全部旧世代失效
 # ——这是设计好的迁移路径：旧世代不采纳 ⇒ 回退 WebM 播放 + 后台按新档重新供给。
 # **v3 与 v5 之间没有"v4 档"**：``HOLE_RESTORE_ENABLED``（镂空还原）从未启用、
 # 现在仍是挂起状态（实机误切白色鲸鳍），所以它不占档位——没有一份产物是"v4 产物"。
 # v5 相对 v3 只多一步：把 ``a == 1`` 的底板清成全透明（``floor_faint_alpha``）。
-ENCODER_DESC = "libwebp lossy q70 (bgra straight, unblend-white-v5)"
+ENCODER_DESC = "libwebp lossy q90 (bgra straight, unblend-white-v5)"
 # meta 里的反解标记：这份帧集是**白底反解 v5 过**的（供将来识别/迁移用）。
 # 与 ``ENCODER_DESC`` 同写同弃，采纳闸门只看 encoder 串——标记不足以单独构成身份。
 UNBLEND_MARK = "white-v5"
-# 改档之前的 encoder 串（热集无损 / 冷集 Q80 / 反解 v2 / 反解 v3）：**只作历史识别**，
+# 改档之前的 encoder 串（热集无损 / 冷集 Q80 / 反解 v2 / 反解 v3 / Q70-v5）：**只作历史识别**，
 # 绝不写进 meta。它们天然不等于 ``ENCODER_DESC`` ⇒ 那一代产物不被采纳
 # （迁移路径，不是巧合）；列在这里是为了让"上一代的串长什么样"在代码里可查，
 # 而不是只能靠字符串比对去猜。v2（``unblend-white``）与 v3 的差别是**像素级**的
@@ -286,11 +286,12 @@ LEGACY_ENCODER_DESCS: tuple[str, ...] = (
     "libwebp lossy q80 (bgra straight)",
     "libwebp lossy q70 (bgra straight, unblend-white)",
     "libwebp lossy q70 (bgra straight, unblend-white-v3)",
+    "libwebp lossy q70 (bgra straight, unblend-white-v5)",
 )
 # 阶段二编码参数：libwebp 编码器（Pillow 的 webp 后端就是 libwebp，与 ``_ffmpeg_argv``
-# 用的同一个），quality=70 与用户实测口径一致；method=4 = libwebp 默认压缩档，与
+# 用的同一个），quality=90 减少RGB量化损失，alpha仍走无损位流；method=4 = libwebp 默认压缩档，与
 # ffmpeg 的 ``compression_level`` 默认值 4 同档（实测体积/PSNR 持平，见报告）。
-WEBP_QUALITY = 70
+WEBP_QUALITY = 90
 WEBP_METHOD = 4
 # 白底反解 v3 的两端（详见模块文档「两段式管线与白底反解 v5」）：
 # ``UNBLEND_MIN_ALPHA`` = 0.08 × 255 ≈ 20.4，即 a/255 < 0.08 不反解；a ≥ 250 也不反解。
@@ -568,7 +569,7 @@ def is_lossy_clip(webm: Path | str, videos_dir: Path | str,
                   *, folders: Iterable[str] = LOSSY_FOLDERS) -> bool:
     """该 clip 是否属于**冷集目录**（``LOSSY_FOLDERS`` = random/events）：看第一级目录。
 
-    改档后它**不再选择编码档**（全部 clip 都是 Q70 + 反解 v5）；剩下的含义只有"冷集"
+    改档后它**不再选择编码档**（全部 clip 都是 Q90 + 反解 v5）；剩下的含义只有"冷集"
     ——供给序把冷集排在全部热集之后（``supply_priority``）。保留是因为构建期 CLI
     （``tools/convert_frameseq.py``）按它给 ``convert_clip(lossy=...)`` 传参，而那个
     文件不在本批改动范围内：同名同步更新后，本函数与 ``convert_clip`` 的 ``lossy``
@@ -677,7 +678,7 @@ def current_generation(webm: Path | str, videos_dir: Path | str,
 
     生产侧（``plan_clips``）与消费侧（``MovieLibrary.rescan_frameseq``）共用
     本谓词——"什么算当前源的帧序列缓存"只有一处定义。档位也是采纳条件：``meta``
-    的 encoder 必须等于当前档位串（``ENCODER_DESC`` = Q70 + 白底反解 v5）——不符说明
+    的 encoder 必须等于当前档位串（``ENCODER_DESC`` = Q90 + 白底反解 v5）——不符说明
     这份产物不是按当前档位产出的（改档前的热集无损 / 冷集 Q80 / 反解 v2 / 反解 v3、
     手工搬运、旧工具），
     不采纳、列进待转。**改档即让全部旧世代走这条路径**：回退 WebM 播放 + 后台按
@@ -1224,7 +1225,7 @@ def _ffmpeg_argv(exe: str, webm: Path, tmp_dir: Path) -> list[str]:
     ]
 
 
-# --------------------------------------------- 阶段二：白底反解 v5 + Q70 重编码
+# --------------------------------------------- 阶段二：白底反解 v5 + Q90 重编码
 def _pil():
     """懒载 Pillow：``(Image, ImageMath, ImageFilter, ImageChops)``。
 
@@ -1480,7 +1481,7 @@ def floor_faint_alpha(im):
     真素材上 ``a = 1`` 的像素里 99.0-99.5% 的 RGB 已经是 0，只有微缩环上那 ≈0.5%
     带着非 0 颜色（最大 ≈170），置 0 正是为它们准备的。
 
-    位置 = ``unblend_v3`` 的**最后一步**（微缩之后、Q70 编码之前）。与放在微缩之前
+    位置 = ``unblend_v3`` 的**最后一步**（微缩之后、Q90 编码之前）。与放在微缩之前
     **逐位等价**：清理把 0/1 都映射成 0（``F(0) = F(1) = 0``，其余不变）是单调不增的，
     而微缩取的是 3×3 最小值（``min F(x) = F(min x)``）；放在最后是因为它产出的
     就是发布出去的像素，WebP 的 alpha 走无损位流（实测编码→解码后 ``a == 1`` 仍是 0）。
@@ -1809,7 +1810,7 @@ def unblend_v3(im):
     镂空还原开启时实测 **+24.5ms**（第四批口径；挂起时 **+0ms**）；
     v5 的底板清理实测 **+4.6ms**（640×360 真素材帧、铺满 a==1；无 a==1 的帧
     **1.3ms**——掩膜 + 包围盒 + 原对象返回，见 PR 报告 §四）。
-    再加 Q70 重编码 42.3ms，含逐帧读写（读盘/解码/落盘）**≈99ms/帧**
+    再加 Q90 重编码 42.3ms，含逐帧读写（读盘/解码/落盘）**≈99ms/帧**
     （预算 210ms；2.5 万帧 ≈41 分钟）。对照：v2 同口径 69.2ms/帧；同一份 v3 代码
     把扩散放回整帧是 102.8ms（单帧计算，不含编码）——**裁剪是这条管线守得住预算的
     那一步**（收色带包围盒外扩扩散半径，实测占整帧 27.9%）。
@@ -1825,7 +1826,7 @@ def unblend_v3(im):
 def unblend_frames_in_place(frames_dir: Path | str, *,
                             cancelled: Callable[[], bool] | None = None
                             ) -> tuple[int, int, bool, str]:
-    """阶段二：把目录里的 ``f_*.webp`` 逐帧反解 v5 + Q70 重编码（原地覆盖）。
+    """阶段二：把目录里的 ``f_*.webp`` 逐帧反解 v5 + Q90 重编码（原地覆盖）。
 
     ``v5`` = ``unblend_v3``（白底反解 → 低 alpha 亮色收色 → alpha 微缩 1px →
     alpha 底板清理，见模块文档）。相对 v3 的差别是**背景底板**：``a == 1`` 的像素
@@ -1841,9 +1842,9 @@ def unblend_frames_in_place(frames_dir: Path | str, *,
       无损帧原样留着（能播、帧数对），只记 warning——整段供给绝不因一帧坏掉而中断；
     - **整段不可用**（Pillow / ``ImageMath.lambda_eval`` 缺失、目录读不开）⇒
       ``(0, 0, False, 错误文本)``：调用方丢弃半成品并按失败收口。绝不发布「meta 写着
-      Q70+反解 v5、里面却是无损帧」的世代——那是假凭证（与「戳与帧不符」同一类错）；
+      Q90+反解 v5、里面却是无损帧」的世代——那是假凭证（与「戳与帧不符」同一类错）；
     - ``cancelled`` / ``session_ending()`` 置位 ⇒ **停手并置 ``被打断`` 位**：此时
-      目录里是「一部分 Q70 + 一部分无损」的混合体，绝不能发布，由调用方丢弃半成品
+      目录里是「一部分 Q90 + 一部分无损」的混合体，绝不能发布，由调用方丢弃半成品
       （issue #111 的关机窗口：逐帧粒度把不可中断的窗口压到一次 unlink）；
     - 每帧先写 ``f_*.webp.part`` 再 ``os.replace``：失败留下的半个文件不冒充帧，
       也不会被 ``frames_on_disk`` 数进帧数账。
@@ -2002,7 +2003,7 @@ def convert_clip(webm: Path | str, out_dir: Path | str, *, force: bool = False,
 
     - **阶段一**：ffmpeg 一次调用把源 webm 写成**无损**帧序列（``_ffmpeg_argv``，
       永远 ``-lossless 1``）；
-    - **阶段二**：``unblend_frames_in_place`` 逐帧白底反解 v5 + Q70 原地重编码。整段
+    - **阶段二**：``unblend_frames_in_place`` 逐帧白底反解 v5 + Q90 原地重编码。整段
       进不了阶段二（Pillow/ImageMath 缺失）⇒ 丢弃半成品、按失败收口；单帧失败只
       跳过那一帧（日志留痕，帧数不变）。
 
@@ -2114,12 +2115,12 @@ def convert_clip(webm: Path | str, out_dir: Path | str, *, force: bool = False,
         _discard(tmp_dir)
         return False, "转换期间源身份已变，丢弃本轮产物（不发布戳与帧不符的世代）"
 
-    # ---- 阶段二：逐帧白底反解 v5 + Q70 重编码（原地覆盖 tmp 里的无损帧）------
+    # ---- 阶段二：逐帧白底反解 v5 + Q90 重编码（原地覆盖 tmp 里的无损帧）------
     # 放在身份对账**之后**：对账是毫秒级、阶段二是秒级，先花便宜的；源若已漂移，
     # 这一段的 CPU 一个周期都不该花。整段失败 ⇒ 丢弃半成品（绝不发布一份
-    # "meta 写着 Q70+反解 v5、帧却是无损"的假凭证）；单帧失败只跳过那一帧。
+    # "meta 写着 Q90+反解 v5、帧却是无损"的假凭证）；单帧失败只跳过那一帧。
     # ``interrupted``（会话结束/取消落在阶段二里）同样丢弃：那一刻目录里是
-    # 「一部分 Q70 + 一部分无损」的混合体，发布出去就是假 meta。
+    # 「一部分 Q90 + 一部分无损」的混合体，发布出去就是假 meta。
     # 注意这里**不**在阶段二成功后复查会话闸门：一趟已经完成的转换不因为会话结束
     # 就被丢掉（与阶段一的既有口径一致——闸门管的是"不再起新的活"，不是"销毁战果"）。
     encoded, skipped, interrupted, problem = unblend_frames_in_place(
