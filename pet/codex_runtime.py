@@ -75,7 +75,9 @@ class CodexRuntime(QObject):
                             stream.seek(offset)
                             while True:
                                 pos = stream.tell()
-                                line = stream.readline(1024 * 1024)
+                                # Images/tool output can make a JSONL record exceed 1 MiB.
+                                # Read through its newline so later completion events remain reachable.
+                                line = stream.readline()
                                 if not line:
                                     break
                                 if not line.endswith(b"\n"):
@@ -113,14 +115,21 @@ class CodexRuntime(QObject):
             snapshot = (state, tuple(sessions))
             sprite = sprites[slot]
             host = overlay.host_for_sprite(sprite)
-            changed = self.last.get(slot) != snapshot
+            previous = self.last.get(slot)
+            ended = [session for session in previous[1] if states.get(session) == "idle"] if previous else []
+            changed = previous != snapshot
             if not changed and state not in ("thinking", "working"):
                 continue
             self.last[slot] = snapshot
             label = {"attention": "等待查看", "error": "异常", "working": "工作中", "thinking": "思考中", "idle": "已完成"}[state]
             if changed:
                 logging.info("Codex session routing: slot=%s state=%s sessions=%s", slot, state, len(sessions))
-                overlay._show_bubble_text_for(sprite, f"Codex · {label} · {len(sessions)}个会话", 4500)
+                message = f"Codex · {label} · {len(sessions)}个会话"
+                if ended:
+                    message = f"Codex · {len(ended)}个会话已结束 · 剩余{len(sessions)}个会话"
+                    if not sessions:
+                        message += " · 已完成"
+                overlay._show_bubble_text_for(sprite, message, 4500)
             if state in ("thinking", "working"):
                 categories = host.behavior._categories(sprite.library)
                 acts = categories.get("acts", [])

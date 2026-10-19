@@ -55,3 +55,91 @@ def test_native_polling_does_not_write_application_config(tmp_path, qapp):
     runtime.start()
     assert runtime.worker is None
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("terminal", ["task_complete", "task_aborted"])
+def test_large_transcript_record_does_not_hide_completed_sessions(tmp_path, monkeypatch, qapp, terminal):
+    import json
+    from datetime import datetime
+    from PySide6.QtCore import Qt
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    day = tmp_path / "sessions" / datetime.now().strftime("%Y/%m/%d")
+    day.mkdir(parents=True)
+    started = {"type": "event_msg", "payload": {"type": "task_started"}}
+    large = {"type": "response_item", "payload": {"type": "function_call_output", "output": "x" * (2 * 1024 * 1024)}}
+    for index in range(4):
+        records = [started, large]
+        if index < 2:
+            records.append({"type": "event_msg", "payload": {"type": terminal}})
+        (day / f"session-{index}.jsonl").write_text("".join(json.dumps(record) + "\n" for record in records))
+    runtime = CodexRuntime(SimpleNamespace())
+    snapshots = []
+    runtime.updated.connect(snapshots.append, Qt.DirectConnection)
+    monkeypatch.setattr(runtime.stopped, "wait", lambda _: runtime.stopped.set())
+    runtime.poll()
+    states = snapshots[-1]
+    assert sum(state != "idle" for state in states.values()) == 2
+    assert states[str(day / "session-0.jsonl")] == "idle"
+    assert states[str(day / "session-1.jsonl")] == "idle"
+
+
+def test_partial_large_record_is_retried_until_newline_then_completion(tmp_path, monkeypatch, qapp):
+    import json
+    from datetime import datetime
+    from PySide6.QtCore import Qt
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    day = tmp_path / "sessions" / datetime.now().strftime("%Y/%m/%d")
+    day.mkdir(parents=True)
+    path = day / "partial.jsonl"
+    started = json.dumps({"type": "event_msg", "payload": {"type": "task_started"}}) + "\n"
+    large = json.dumps({"type": "response_item", "payload": {"type": "function_call_output", "output": "x" * (2 * 1024 * 1024)}})
+    path.write_text(started + large[:-10])
+    runtime = CodexRuntime(SimpleNamespace())
+    snapshots = []
+    runtime.updated.connect(snapshots.append, Qt.DirectConnection)
+
+    def next_cycle(_):
+        if len(snapshots) == 1:
+            with path.open("a") as stream:
+                stream.write(large[-10:] + "\n")
+                stream.write(json.dumps({"type": "event_msg", "payload": {"type": "task_complete"}}) + "\n")
+        else:
+            runtime.stopped.set()
+
+    monkeypatch.setattr(runtime.stopped, "wait", next_cycle)
+    runtime.poll()
+    assert snapshots == [{str(path): "thinking"}, {str(path): "idle"}]
+
+
+@pytest.mark.parametrize("slots", [[1], [1, 4]])
+def test_finished_session_notifies_its_previous_pet_once(qapp, slots):
+    sprites = {slot: Sprite() for slot in slots}
+    bubbles = []
+    behavior = Behavior()
+    overlay = SimpleNamespace(
+        _spawned_slots={sprite: slot for slot, sprite in sprites.items()},
+        _all_sprites=lambda: list(sprites.values()),
+        _sprite_visible=lambda s: True,
+        host_for_sprite=lambda s: SimpleNamespace(behavior=behavior),
+        _show_bubble_text_for=lambda *args: bubbles.append(args),
+    )
+    runtime = CodexRuntime(SimpleNamespace(_overlay_shell=overlay))
+    runtime.updated.emit({"a": "working", "b": "working", "c": "thinking"})
+    qapp.processEvents()
+    bubbles.clear()
+    runtime.updated.emit({"a": "idle", "b": "working", "c": "thinking"})
+    qapp.processEvents()
+    finished = [entry for entry in bubbles if "会话已结束" in entry[1]]
+    assert len(finished) == 1
+    assert finished[0][0] is sprites[1]
+    assert "1个会话已结束" in finished[0][1]
+    assert f"剩余{2 if len(slots) == 1 else 1}个会话" in finished[0][1]
+    before = len(bubbles)
+    runtime.updated.emit({"a": "idle", "b": "working", "c": "thinking"})
+    qapp.processEvents()
+    assert len(bubbles) == before
+    runtime.updated.emit({"a": "idle", "b": "idle", "c": "idle"})
+    qapp.processEvents()
+    assert "剩余0个会话" in bubbles[-1][1]
